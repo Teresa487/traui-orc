@@ -10,7 +10,7 @@ mod config;
 use commands::AppState;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 /// 解析快捷键字符串。支持 "F4"、"Ctrl+Alt+O" 这类写法。
 fn parse_hotkey(s: &str) -> Option<Shortcut> {
@@ -145,48 +145,44 @@ fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
     let cfg = config::load();
     let hotkey_str = cfg.hotkey.clone();
+    let shortcut = parse_hotkey(&hotkey_str);
+    if shortcut.is_none() {
+        eprintln!("快捷键 {hotkey_str} 解析失败，请在设置里换一个");
+    }
+
+    // 热键插件必须只注册一次：这里同时配置好快捷键与回调
+    let mut shortcut_plugin = tauri_plugin_global_shortcut::Builder::new();
+    if let Some(sc) = shortcut {
+        shortcut_plugin = shortcut_plugin
+            .with_shortcut(sc)
+            .expect("快捷键格式无效");
+    }
+    let shortcut_plugin = shortcut_plugin
+        .with_handler(|app, _shortcut, event| {
+            if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            // 先藏主窗口，再把遮罩拉起来
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.hide();
+            }
+            if let Err(err) = spawn_overlay(app) {
+                eprintln!("拉起遮罩失败: {err}");
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                }
+            }
+        })
+        .build();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(shortcut_plugin)
         .manage(AppState {
             cfg: Mutex::new(cfg),
         })
-        .setup(move |app| {
-            let handle = app.handle().clone();
-
-            // 注册全局热键
-            if let Some(sc) = parse_hotkey(&hotkey_str) {
-                let hk = handle.clone();
-                if let Err(e) = handle.plugin(
-                    tauri_plugin_global_shortcut::Builder::new()
-                        .with_handler(move |_app, _shortcut, event| {
-                            if event.state() == ShortcutState::Pressed {
-                                if let Some(w) = hk.get_webview_window("main") {
-                                    let _ = w.hide();
-                                }
-                                if let Err(err) = spawn_overlay(&hk) {
-                                    eprintln!("拉起遮罩失败: {err}");
-                                    if let Some(w) = hk.get_webview_window("main") {
-                                        let _ = w.show();
-                                    }
-                                }
-                            }
-                        })
-                        .build(),
-                ) {
-                    eprintln!("注册热键插件失败: {e}");
-                }
-                if let Err(e) = handle.global_shortcut().register(sc) {
-                    eprintln!("注册快捷键 {hotkey_str} 失败: {e}");
-                }
-            } else {
-                eprintln!("快捷键 {hotkey_str} 解析失败，请在设置里换一个");
-            }
-
-            Ok(())
-        })
+        .setup(|_app| Ok(()))
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::save_config,
