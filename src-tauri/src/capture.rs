@@ -1,6 +1,6 @@
 //! 屏幕捕获：先截整屏，交给前端框选，再按选区裁剪
 
-use image::{ImageEncoder, RgbaImage};
+use image::RgbaImage;
 use std::io::Cursor;
 
 pub struct MonitorInfo {
