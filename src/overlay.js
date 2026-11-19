@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const win = getCurrentWindow();
@@ -156,7 +157,11 @@ async function initScale() {
 }
 
 /** 取主进程在遮罩出现前抓好的整屏图，铺成背景 */
-async function loadShot() {
+async function loadShot(silent = false) {
+  // 每次显示都当作一次全新的框选
+  resetSelection();
+  hintEl.innerHTML =
+    '拖拽鼠标框选要识别的区域<br /><kbd>Esc</kbd> 或 <kbd>右键</kbd> 取消';
   try {
     const [, b64] = await invoke("take_overlay_shot");
     shotEl.src = `data:image/png;base64,${b64}`;
@@ -170,9 +175,26 @@ async function loadShot() {
       scaleFactor = shotEl.naturalWidth / window.innerWidth;
     }
   } catch (e) {
-    hintEl.innerHTML = `<span class="err">获取截图失败：${e}</span><br />按 Esc 关闭`;
+    if (!silent) {
+      hintEl.innerHTML = `<span class="err">获取截图失败：${e}</span><br />按 Esc 关闭`;
+    }
   }
 }
 
 resetShades();
-initScale().then(loadShot);
+
+// 主进程每次显示遮罩后都会发这个事件，收到就重新取图。
+// 窗口是开机时创建好的，JS 不会随显示重新执行，所以不能只在启动时取一次。
+listen("begin-capture", () => {
+  loadShot();
+});
+
+initScale();
+
+// 兜底：如果页面加载晚于事件，主动试一次。
+// 拿不到图会报错，所以静默失败，等事件来了再取。
+if (document.readyState === "complete") {
+  loadShot(true);
+} else {
+  window.addEventListener("load", () => loadShot(true));
+}

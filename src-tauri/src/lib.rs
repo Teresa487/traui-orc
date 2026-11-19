@@ -152,6 +152,15 @@ fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
     let _ = win.show();
     let _ = win.set_focus();
 
+    // 遮罩窗口在启动时就已加载，JS 不会随显示重新执行，
+    // 所以每次显示后都要通知它重新取图。
+    // 稍等一帧，等窗口真正可见再发，避免事件先于窗口就绪。
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        let _ = app2.emit("begin-capture", ());
+    });
+
     Ok(())
 }
 
