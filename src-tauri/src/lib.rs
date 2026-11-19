@@ -115,8 +115,12 @@ pub struct OverlayShotData {
 /// 关键点：屏幕内容必须在遮罩出现**之前**截下来，否则截到的是遮罩本身。
 /// 所以这里先截屏存进 OverlayShot，前端再从命令里把图取走当背景。
 fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
-    // 先定位要覆盖哪块屏幕
-    let (idx, m) = capture::monitor_at(0, 0)?;
+    // 跟鼠标走：用户在哪块屏幕上按的快捷键，就在哪块屏幕上框选
+    let (cx, cy) = app
+        .cursor_position()
+        .map(|p| (p.x as i32, p.y as i32))
+        .unwrap_or((0, 0));
+    let (idx, m) = capture::monitor_at(cx, cy)?;
 
     // 遮罩还没出现，此刻截屏拿到的才是真实画面
     let shot = capture::capture_monitor_png_base64(idx)?;
@@ -132,10 +136,19 @@ fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    // xcap 的 x/y/width/height 都是物理像素，而 Tauri 的 inner_size/position
+    // 收的是逻辑像素。Windows 上两者只在 100% 缩放时相等，
+    // 所以这里统一换算，否则 150%/200% 的屏幕上遮罩会错位或偏小。
+    let scale = if m.scale_factor > 0.0 { m.scale_factor as f64 } else { 1.0 };
+    let logical_x = m.x as f64 / scale;
+    let logical_y = m.y as f64 / scale;
+    let logical_w = m.width as f64 / scale;
+    let logical_h = m.height as f64 / scale;
+
     let win = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay.html".into()))
         .title("选择区域")
-        .inner_size(m.width as f64, m.height as f64)
-        .position(m.x as f64, m.y as f64)
+        .inner_size(logical_w, logical_h)
+        .position(logical_x, logical_y)
         .decorations(false)
         .transparent(false)
         .always_on_top(true)
@@ -238,16 +251,21 @@ pub fn run() {
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            // 先藏主窗口，再把遮罩拉起来
+            // hide() 只是把请求丢给窗口线程就返回，画面还没真正消失。
+            // 不等一下就去截屏，会把主窗口一起截进去。
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.hide();
             }
-            if let Err(err) = spawn_overlay(app) {
-                eprintln!("拉起遮罩失败: {err}");
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
+            let app2 = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(120));
+                if let Err(err) = spawn_overlay(&app2) {
+                    eprintln!("拉起遮罩失败: {err}");
+                    if let Some(w) = app2.get_webview_window("main") {
+                        let _ = w.show();
+                    }
                 }
-            }
+            });
         })
         .build();
 
@@ -285,6 +303,7 @@ pub fn run() {
             commands::save_config,
             commands::list_monitors,
             commands::take_overlay_shot,
+            commands::submit_selection,
             commands::recognize_region,
             commands::recognize_file,
             commands::recognize_image_bytes,

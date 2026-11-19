@@ -105,19 +105,17 @@ async function finishSelection() {
   loadingEl.textContent = "识别中……";
 
   try {
-    // 先恢复主窗口，让用户看到结果
-    await invoke("end_capture");
-    await win.hide();
-
-    await invoke("recognize_region", {
-      monitorIndex: monitor.index,
+    // 遮罩只交出坐标，识别和显示都由主窗口负责
+    await invoke("submit_selection", {
       x: toPhysical(r.left),
       y: toPhysical(r.top),
       width: wPhys,
       height: hPhys,
     });
+    await win.hide();
   } catch (e) {
-    console.error("识别失败", e);
+    console.error("提交选区失败", e);
+    loadingEl.textContent = `提交失败: ${e}`;
   }
 }
 

@@ -110,6 +110,48 @@ pub fn capture_region_png_base64(
     encode_png_base64(&img)
 }
 
+/// 从已保存的整屏截图里裁出选区。
+///
+/// 关键：不能在遮罩显示期间重新截屏，否则截到的是遮罩自己。
+/// 所以这里只对内存里那张热键触发瞬间的图做裁剪。
+pub fn crop_png_base64(
+    png_b64: &str,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    upscale: u32,
+) -> Result<String, String> {
+    let raw = base64_decode(png_b64)?;
+    let img = image::load_from_memory(&raw).map_err(|e| format!("解码截图失败: {e}"))?;
+
+    let iw = img.width();
+    let ih = img.height();
+    if iw == 0 || ih == 0 {
+        return Err("截图尺寸异常".into());
+    }
+
+    // 夹紧到图片范围内，避免越界
+    let x = x.min(iw.saturating_sub(1));
+    let y = y.min(ih.saturating_sub(1));
+    let w = width.min(iw - x).max(1);
+    let h = height.min(ih - y).max(1);
+
+    let cropped = img.crop_imm(x, y, w, h);
+    let out: RgbaImage = if upscale > 1 {
+        image::imageops::resize(
+            &cropped,
+            w * upscale,
+            h * upscale,
+            image::imageops::FilterType::Lanczos3,
+        )
+    } else {
+        cropped.to_rgba8()
+    };
+
+    encode_png_base64(&out)
+}
+
 fn encode_png_base64(img: &RgbaImage) -> Result<String, String> {
     let mut buf = Cursor::new(Vec::new());
     img.write_with_encoder(image::codecs::png::PngEncoder::new(&mut buf))

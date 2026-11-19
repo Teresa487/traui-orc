@@ -97,28 +97,23 @@ async function startCapture() {
   }
 }
 
-/* 遮罩窗口回传选区后，在这里发起识别 */
-async function runRecognize(monitorIndex, x, y, w, h) {
+/* 主进程把遮罩的选区转过来，在这里发起识别并显示 */
+listen("selection", async (e) => {
+  const { x, y, width, height } = e.payload;
   setStatus("识别中……", "busy");
   setResult("");
   try {
-    const text = await invoke("recognize_region", {
-      monitorIndex,
-      x,
-      y,
-      width: w,
-      height: h,
-    });
+    const text = await invoke("recognize_region", { x, y, width, height });
     setResult(text);
     setStatus("识别完成", "ok");
-    if (config.auto_copy && els.result.value) {
-      await writeText(els.result.value);
+    if (config?.auto_copy && text) {
+      await writeText(text);
       setStatus("识别完成，已复制", "ok");
     }
-  } catch (e) {
-    setStatus(`识别失败: ${e}`, "err");
+  } catch (err) {
+    setStatus(`识别失败: ${err}`, "err");
   }
-}
+});
 
 /* ---------- 文件识别 ---------- */
 

@@ -52,13 +52,16 @@ pub fn list_monitors() -> Result<Vec<MonitorDto>, String> {
 
 /// 取出热键触发时预存的屏幕截图，供遮罩层当背景。
 /// 返回 (显示器索引, PNG base64)。
+///
+/// 这里用 clone 而不是 take：裁剪阶段还要用同一张图，
+/// 取走的话识别就会报「截图已失效」。
 #[tauri::command]
 pub fn take_overlay_shot(
     state: State<'_, crate::OverlayShot>,
 ) -> Result<(usize, String), String> {
-    let mut guard = state.0.lock().unwrap();
-    let data = guard.take().ok_or("没有待用的屏幕截图")?;
-    Ok((data.monitor, data.png_b64))
+    let guard = state.0.lock().unwrap();
+    let data = guard.as_ref().ok_or("没有待用的屏幕截图")?;
+    Ok((data.monitor, data.png_b64.clone()))
 }
 
 /// 按选区截图并识别。
@@ -66,7 +69,7 @@ pub fn take_overlay_shot(
 #[tauri::command]
 pub async fn recognize_region(
     state: State<'_, AppState>,
-    monitor_index: usize,
+    shot: State<'_, crate::OverlayShot>,
     x: u32,
     y: u32,
     width: u32,
@@ -91,15 +94,16 @@ pub async fn recognize_region(
         return Err("选区太小了".into());
     }
 
-    // 1. 截取选区
-    let png_b64 = capture::capture_region_png_base64(
-        monitor_index,
-        x,
-        y,
-        width,
-        height,
-        cfg.upscale,
-    )?;
+    // 1. 从热键触发时存下的整屏图里裁剪。
+    //    不能重新截屏 —— 遮罩此刻正盖在屏幕上，重新截只能截到遮罩。
+    let full_png = {
+        let guard = shot.0.lock().unwrap();
+        guard
+            .as_ref()
+            .map(|d| d.png_b64.clone())
+            .ok_or("截图已失效，请重新按快捷键")?
+    };
+    let png_b64 = capture::crop_png_base64(&full_png, x, y, width, height, cfg.upscale)?;
 
     // 2. 转成 JPEG，体积小很多
     let jpeg_b64 = capture::png_base64_to_jpeg_base64(&png_b64, 92)?;
@@ -154,6 +158,31 @@ pub async fn recognize_file(
         mode.temperature,
     )
     .await
+}
+
+/// 遮罩框选完成后调用：把选区坐标转给主窗口，由主窗口去识别和显示。
+///
+/// 结果不能留在遮罩里 —— 它识别完就隐藏了，没人显示结果。
+#[tauri::command]
+pub fn submit_selection(
+    app: AppHandle,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    // 先恢复主窗口，用户才看得到进度
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+    app.emit(
+        "selection",
+        serde_json::json!({ "x": x, "y": y, "width": width, "height": height }),
+    )
+    .map_err(|e| format!("通知主窗口失败: {e}"))?;
+    Ok(())
 }
 
 /// 从前端传上来的图片字节直接识别（浏览器拿不到真实文件路径）
