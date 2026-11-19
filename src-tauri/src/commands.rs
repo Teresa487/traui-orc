@@ -100,34 +100,17 @@ pub async fn recognize_region(
     // 2. 转成 JPEG，体积小很多
     let jpeg_b64 = capture::png_base64_to_jpeg_base64(&png_b64, 92)?;
 
-    // 3. 调 API
-    if cfg.stream {
-        let app2 = app.clone();
-        api::ocr_stream(
-            &cfg.api_base,
-            &cfg.api_key,
-            &cfg.model,
-            &mode.system_prompt,
-            &mode.prompt,
-            &jpeg_b64,
-            mode.temperature,
-            move |chunk| {
-                let _ = app2.emit("ocr-chunk", chunk);
-            },
-        )
-        .await
-    } else {
-        api::ocr_once(
-            &cfg.api_base,
-            &cfg.api_key,
-            &cfg.model,
-            &mode.system_prompt,
-            &mode.prompt,
-            &jpeg_b64,
-            mode.temperature,
-        )
-        .await
-    }
+    // 3. 调 API，一次拿完整结果
+    api::ocr_once(
+        &cfg.api_base,
+        &cfg.api_key,
+        &cfg.model,
+        &mode.system_prompt,
+        &mode.prompt,
+        &jpeg_b64,
+        mode.temperature,
+    )
+    .await
 }
 
 /// 直接从剪贴板里的图片识别（暂不支持二进制剪贴板，留作文件导入）

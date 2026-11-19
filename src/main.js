@@ -26,7 +26,6 @@ const els = {
     model: $("cfg-model"),
     hotkey: $("cfg-hotkey"),
     mode: $("cfg-mode"),
-    stream: $("cfg-stream"),
     autoCopy: $("cfg-autocopy"),
     upscale: $("cfg-upscale"),
   },
@@ -51,7 +50,6 @@ function fillForm() {
   els.cfg.apiKey.value = config.api_key;
   els.cfg.model.value = config.model;
   els.cfg.hotkey.value = config.hotkey;
-  els.cfg.stream.checked = config.stream;
   els.cfg.autoCopy.checked = config.auto_copy;
   els.cfg.upscale.value = config.upscale;
 
@@ -75,7 +73,6 @@ function readForm() {
     model: els.cfg.model.value.trim(),
     hotkey: els.cfg.hotkey.value.trim(),
     active_mode: els.cfg.mode.value,
-    stream: els.cfg.stream.checked,
     auto_copy: els.cfg.autoCopy.checked,
     upscale: Math.max(1, Math.min(4, parseInt(els.cfg.upscale.value, 10) || 1)),
   };
@@ -123,7 +120,7 @@ async function runRecognize(monitorIndex, x, y, w, h) {
       width: w,
       height: h,
     });
-    if (!config.stream) setResult(text);
+    setResult(text);
     setStatus("识别完成", "ok");
     if (config.auto_copy && els.result.value) {
       await writeText(els.result.value);
@@ -219,11 +216,6 @@ els.btnTest.addEventListener("click", async () => {
 /* 主进程通过全局热键拉起遮罩时，前端同步一下状态 */
 listen("begin-capture", () => {
   setStatus("遮罩已打开，请框选区域", "busy");
-});
-
-/* 流式输出：后端每收到一段就推过来 */
-listen("ocr-chunk", (e) => {
-  appendResult(e.payload);
 });
 
 /* 快捷键：Ctrl+Enter 复制，Esc 关设置 */

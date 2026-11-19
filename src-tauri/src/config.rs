@@ -37,8 +37,6 @@ pub struct AppConfig {
     /// 当前选中的模式名
     pub active_mode: String,
     pub modes: Vec<OcrMode>,
-    /// 是否使用流式响应（边识别边显示）
-    pub stream: bool,
     /// 识别完成后自动复制到剪贴板
     pub auto_copy: bool,
     /// 截图时额外放大的倍数，便于识别小字
@@ -52,61 +50,23 @@ impl Default for AppConfig {
             api_key: String::new(),
             model: "ministral-14b-latest".into(),
             hotkey: "F4".into(),
-            active_mode: "文本识别".into(),
+            active_mode: "文字提取".into(),
             modes: builtin_modes(),
-            stream: false,
             auto_copy: true,
             upscale: 1,
         }
     }
 }
 
-/// 内置模式，照搬天若 OCR 那 6 套提示词思路
+/// 只做一件事：把图片里的文字提取出来
 pub fn builtin_modes() -> Vec<OcrMode> {
-    vec![
-        OcrMode {
-            mode: "文本识别".into(),
-            description: "通用模式，保留原格式".into(),
-            system_prompt: "你是一个专业的 OCR 引擎。任务是识别图片中的文字。请严格遵守：\n1. 直接输出识别到的内容，严禁输出“好的”“识别结果如下”等任何废话。\n2. 严禁使用 Markdown 代码块包裹内容，除非图片原文里真的有。\n3. 尽量保持原始的换行和段落格式。".into(),
-            prompt: "请识别这张图片中的文字：".into(),
-            temperature: 0.1,
-        },
-        OcrMode {
-            mode: "公式识别 (LaTeX)".into(),
-            description: "把数学公式转成 LaTeX 源码".into(),
-            system_prompt: "你是一个数学公式 OCR 引擎。只输出 LaTeX 代码，严禁使用 ``` 代码块。行内公式用 $ 包裹，独立公式用 $$ 包裹。".into(),
-            prompt: "将图片中的数学公式转换为 LaTeX 格式：".into(),
-            temperature: 0.1,
-        },
-        OcrMode {
-            mode: "表格识别 (Markdown)".into(),
-            description: "输出 Markdown 表格".into(),
-            system_prompt: "你是一个表格结构化专家。直接输出 Markdown 表格源码，严禁添加代码块标记，不要任何解释性文字。".into(),
-            prompt: "请将图片中的表格转换为 Markdown 格式：".into(),
-            temperature: 0.1,
-        },
-        OcrMode {
-            mode: "表格识别 (CSV)".into(),
-            description: "输出 CSV，可直接贴进 Excel".into(),
-            system_prompt: "你是一个数据处理专家。把图片表格转成 CSV（英文逗号分隔），严禁用代码块包裹，直接输出数据流。".into(),
-            prompt: "请将图片表格转换为 CSV 数据格式：".into(),
-            temperature: 0.1,
-        },
-        OcrMode {
-            mode: "图片翻译".into(),
-            description: "识别并翻译，中英互译".into(),
-            system_prompt: "你是一个资深翻译引擎。自动检测语言：中文译成英文，英文译成中文。只输出翻译结果，不要原文，不要解释。".into(),
-            prompt: "请翻译图片中的文字内容：".into(),
-            temperature: 0.5,
-        },
-        OcrMode {
-            mode: "图片总结".into(),
-            description: "分析图片，提炼核心信息".into(),
-            system_prompt: "你是一个视觉内容分析师。用简练语言概括图片核心内容，直接输出总结段落，不要“这张图片展示了”之类起手式。".into(),
-            prompt: "请简要总结这张图片的核心内容：".into(),
-            temperature: 0.5,
-        },
-    ]
+    vec![OcrMode {
+        mode: "文字提取".into(),
+        description: "把图片里的文字转成可复制的文本".into(),
+        system_prompt: "你是一个 OCR 引擎。你的唯一任务是识别图片中的文字并原样输出。\n规则：\n1. 只输出识别到的文字，不要任何开场白、解释或总结。\n2. 不要用 Markdown 代码块包裹结果。\n3. 保持图片中原始的换行和段落结构。\n4. 看不清的字用 □ 代替，不要猜测。".into(),
+        prompt: "识别图片中的文字：".into(),
+        temperature: 0.1,
+    }]
 }
 
 pub fn load() -> AppConfig {
