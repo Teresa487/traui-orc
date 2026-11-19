@@ -156,6 +156,67 @@ fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 把主窗口藏起来（关窗口按钮不退出程序，只收进托盘）
+fn hide_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+}
+
+/// 从托盘恢复主窗口
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// 建托盘图标 + 右键菜单
+fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let item_capture = MenuItem::with_id(app, "capture", "立即截图", true, None::<&str>)?;
+    let item_show = MenuItem::with_id(app, "show", "打开主窗口", true, None::<&str>)?;
+    let item_quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&item_capture, &item_show, &item_quit])?;
+
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| tauri::Error::AssetNotFound("缺少窗口图标".into()))?;
+
+    TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
+        .tooltip("TrauiOCR —— 按 F4 截图识字")
+        .menu(&menu)
+        // 左键单击直接拉起截图，比先开菜单少一步
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "capture" => {
+                let _ = spawn_overlay(app);
+            }
+            "show" => show_main(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // 左键单击恢复主窗口。截图走右键菜单或 F4，避免误触。
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let cfg = config::load();
@@ -198,7 +259,27 @@ pub fn run() {
             cfg: Mutex::new(cfg),
         })
         .manage(OverlayShot(std::sync::Mutex::new(None)))
-        .setup(|_app| Ok(()))
+        .setup(|app| {
+            let handle = app.handle().clone();
+
+            // 托盘常驻，方便确认程序在跑
+            if let Err(e) = setup_tray(&handle) {
+                eprintln!("创建托盘图标失败: {e}");
+            }
+
+            // 点关闭按钮不退出，收进托盘；真正退出走托盘菜单
+            if let Some(win) = app.get_webview_window("main") {
+                let h = handle.clone();
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        hide_main(&h);
+                    }
+                });
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::save_config,
