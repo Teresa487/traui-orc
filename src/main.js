@@ -25,7 +25,6 @@ const els = {
     apiKey: $("cfg-api-key"),
     model: $("cfg-model"),
     hotkey: $("cfg-hotkey"),
-    mode: $("cfg-mode"),
     autoCopy: $("cfg-autocopy"),
     upscale: $("cfg-upscale"),
   },
@@ -53,15 +52,6 @@ function fillForm() {
   els.cfg.autoCopy.checked = config.auto_copy;
   els.cfg.upscale.value = config.upscale;
 
-  els.cfg.mode.innerHTML = "";
-  for (const m of config.modes) {
-    const opt = document.createElement("option");
-    opt.value = m.mode;
-    opt.textContent = m.mode;
-    if (m.mode === config.active_mode) opt.selected = true;
-    els.cfg.mode.appendChild(opt);
-  }
-
   els.hotkeyHint.textContent = config.hotkey;
 }
 
@@ -72,7 +62,6 @@ function readForm() {
     api_key: els.cfg.apiKey.value.trim(),
     model: els.cfg.model.value.trim(),
     hotkey: els.cfg.hotkey.value.trim(),
-    active_mode: els.cfg.mode.value,
     auto_copy: els.cfg.autoCopy.checked,
     upscale: Math.max(1, Math.min(4, parseInt(els.cfg.upscale.value, 10) || 1)),
   };

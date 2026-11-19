@@ -28,38 +28,14 @@ function toPhysical(cssPx) {
   return Math.round(cssPx * monitor.scale_factor);
 }
 
-/** 找到遮罩窗口所在的显示器 */
-async function resolveMonitor() {
-  const monitors = await invoke("list_monitors");
-  const pos = await win.outerPosition();
-  const size = await win.outerSize();
-  const cx = pos.x + size.width / 2;
-  const cy = pos.y + size.height / 2;
-
-  for (let i = 0; i < monitors.length; i++) {
-    const m = monitors[i];
-    const right = m.x + m.width / m.scale_factor;
-    const bottom = m.y + m.height / m.scale_factor;
-    if (cx >= m.x && cx < right && cy >= m.y && cy < bottom) {
-      return { ...m, index: i };
-    }
-  }
-  return monitors[0] ? { ...monitors[0], index: 0 } : null;
-}
-
-/** 截当前屏幕，铺成背景 */
+/** 取主进程在遮罩出现前截好的画面，铺成背景 */
 async function grabScreen() {
-  const m = await resolveMonitor();
-  if (!m) {
-    loadingEl.textContent = "没有检测到显示器";
-    return;
-  }
-  monitor = m;
+  const [index, b64] = await invoke("take_overlay_shot");
+  monitor.index = index;
 
-  const b64 = await invoke("grab_monitor", { index: m.index });
   shotEl.src = `data:image/png;base64,${b64}`;
   await new Promise((r) => {
-    if (shotEl.complete) return r();
+    if (shotEl.complete && shotEl.naturalWidth) return r();
     shotEl.onload = r;
     shotEl.onerror = r;
   });
@@ -67,7 +43,7 @@ async function grabScreen() {
   imgW = shotEl.naturalWidth || 1;
   imgH = shotEl.naturalHeight || 1;
 
-  // 缩放系数以实际图片与 CSS 尺寸的比值为准，比系统 DPI 更可靠
+  // 用实际图片宽度和窗口宽度的比值推算缩放，比系统 DPI 更贴合
   monitor.scale_factor = imgW / Math.max(1, window.innerWidth);
 
   loadingEl.style.display = "none";
@@ -131,7 +107,7 @@ async function finishSelection() {
   try {
     // 先恢复主窗口，让用户看到结果
     await invoke("end_capture");
-    await win.close();
+    await win.hide();
 
     await invoke("recognize_region", {
       monitorIndex: monitor.index,
@@ -147,7 +123,7 @@ async function finishSelection() {
 
 async function cancel() {
   await invoke("end_capture");
-  await win.close();
+  await win.hide();
 }
 
 /* ---------- 鼠标事件 ---------- */

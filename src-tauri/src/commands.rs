@@ -50,17 +50,21 @@ pub fn list_monitors() -> Result<Vec<MonitorDto>, String> {
         .collect())
 }
 
-/// 截整屏，返回 PNG base64，给遮罩层当背景
+/// 取出热键触发时预存的屏幕截图，供遮罩层当背景。
+/// 返回 (显示器索引, PNG base64)。
 #[tauri::command]
-pub fn grab_monitor(index: usize) -> Result<String, String> {
-    capture::capture_monitor_png_base64(index)
+pub fn take_overlay_shot(
+    state: State<'_, crate::OverlayShot>,
+) -> Result<(usize, String), String> {
+    let mut guard = state.0.lock().unwrap();
+    let data = guard.take().ok_or("没有待用的屏幕截图")?;
+    Ok((data.monitor, data.png_b64))
 }
 
 /// 按选区截图并识别。
 /// crop 参数是相对该显示器的物理像素坐标。
 #[tauri::command]
 pub async fn recognize_region(
-    app: AppHandle,
     state: State<'_, AppState>,
     monitor_index: usize,
     x: u32,

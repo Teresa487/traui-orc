@@ -102,8 +102,29 @@ fn parse_code(s: &str) -> Option<Code> {
     }
 }
 
+/// 遮罩出现前截下的屏幕内容，供前端取走当背景
+pub struct OverlayShot(pub std::sync::Mutex<Option<OverlayShotData>>);
+
+pub struct OverlayShotData {
+    pub monitor: usize,
+    pub png_b64: String,
+}
+
 /// 拉起全屏遮罩窗口。已经存在就复用。
+///
+/// 关键点：屏幕内容必须在遮罩出现**之前**截下来，否则截到的是遮罩本身。
+/// 所以这里先截屏存进 OverlayShot，前端再从命令里把图取走当背景。
 fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
+    // 先定位要覆盖哪块屏幕
+    let (idx, m) = capture::monitor_at(0, 0)?;
+
+    // 遮罩还没出现，此刻截屏拿到的才是真实画面
+    let shot = capture::capture_monitor_png_base64(idx)?;
+    {
+        let state = app.state::<OverlayShot>();
+        *state.0.lock().unwrap() = Some(OverlayShotData { monitor: idx, png_b64: shot });
+    }
+
     if let Some(w) = app.get_webview_window("overlay") {
         let _ = w.show();
         let _ = w.set_focus();
@@ -111,16 +132,10 @@ fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // 用主显示器创建遮罩；多屏场景下前端可再调整
-    let (x, y, width, height) = match capture::monitor_at(0, 0) {
-        Ok((_, m)) => (m.x, m.y, m.width, m.height),
-        Err(_) => (0, 0, 1920, 1080),
-    };
-
     let win = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay.html".into()))
         .title("选择区域")
-        .inner_size(width as f64, height as f64)
-        .position(x as f64, y as f64)
+        .inner_size(m.width as f64, m.height as f64)
+        .position(m.x as f64, m.y as f64)
         .decorations(false)
         .transparent(false)
         .always_on_top(true)
@@ -132,9 +147,9 @@ fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
 
     let _ = win.set_focus();
     let app2 = app.clone();
-    // 前端挂载完再通知它去截屏，避免遮罩里截到遮罩自己
+    // 等遮罩真正挂载后再通知它取图
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(260));
+        std::thread::sleep(std::time::Duration::from_millis(180));
         let _ = app2.emit("begin-capture", ());
     });
 
@@ -182,12 +197,13 @@ pub fn run() {
         .manage(AppState {
             cfg: Mutex::new(cfg),
         })
+        .manage(OverlayShot(std::sync::Mutex::new(None)))
         .setup(|_app| Ok(()))
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::save_config,
             commands::list_monitors,
-            commands::grab_monitor,
+            commands::take_overlay_shot,
             commands::recognize_region,
             commands::recognize_file,
             commands::recognize_image_bytes,
