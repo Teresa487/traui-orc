@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>选择区域</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    cursor: crosshair;
+    user-select: none;
+  }
+  #shot {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    pointer-events: none;
+  }
+  /* 全屏压暗，靠 box-shadow 把选区“挖”出来 */
+  #mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+  }
+  #sel {
+    position: absolute;
+    border: 1px solid #4c9aff;
+    background: transparent;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+    display: none;
+    pointer-events: none;
+  }
+  #size {
+    position: absolute;
+    padding: 2px 7px;
+    background: rgba(0, 0, 0, 0.82);
+    color: #fff;
+    font: 12px ui-monospace, monospace;
+    border-radius: 3px;
+    display: none;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  #hint {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #dfe3ea;
+    font: 15px/1.8 system-ui, "Microsoft YaHei", sans-serif;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 18px 26px;
+    border-radius: 8px;
+    pointer-events: none;
+  }
+  #hint kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: ui-monospace, monospace;
+  }
+  #loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #cfd5e0;
+    font: 14px system-ui, sans-serif;
+    background: rgba(0, 0, 0, 0.9);
+  }
+</style>
+</head>
+<body>
+<div id="loading">正在截取屏幕……</div>
+<img id="shot" alt="" />
+<div id="mask"></div>
+<div id="sel"></div>
+<div id="size"></div>
+<div id="hint">
+  拖拽鼠标框选要识别的区域<br />
+  <kbd>Esc</kbd> 取消 &nbsp; <kbd>右键</kbd> 重选
+</div>
+
+<script type="module" src="/src/overlay.js"></script>
+</body>
+</html>

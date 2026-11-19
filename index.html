@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TrauiOCR</title>
+<link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">TrauiOCR</div>
+    <div class="actions">
+      <button id="btn-capture" class="primary">截图识别 <kbd id="hotkey-hint">F4</kbd></button>
+      <button id="btn-file">选图片</button>
+      <button id="btn-settings">设置</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="result-panel">
+      <div class="result-head">
+        <span id="status">就绪</span>
+        <div class="result-tools">
+          <button id="btn-copy" title="复制到剪贴板">复制</button>
+          <button id="btn-clear" title="清空">清空</button>
+        </div>
+      </div>
+      <textarea id="result" spellcheck="false" placeholder="识别结果会出现在这里……"></textarea>
+    </section>
+  </main>
+
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2>设置</h2>
+        <button id="btn-close-settings" class="icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>API 地址
+          <input id="cfg-api-base" type="text" placeholder="https://api.mistral.ai/v1" />
+        </label>
+        <label>API Key
+          <input id="cfg-api-key" type="password" placeholder="sk-..." />
+        </label>
+        <label>模型
+          <input id="cfg-model" type="text" placeholder="ministral-14b-latest" />
+        </label>
+        <label>快捷键
+          <input id="cfg-hotkey" type="text" placeholder="F4 或 Ctrl+Alt+O" />
+        </label>
+        <label>识别模式
+          <select id="cfg-mode"></select>
+        </label>
+        <div class="row">
+          <label class="check"><input id="cfg-stream" type="checkbox" /> 流式输出</label>
+          <label class="check"><input id="cfg-autocopy" type="checkbox" /> 识别后自动复制</label>
+        </div>
+        <label>放大倍数（小字模糊时调大）
+          <input id="cfg-upscale" type="number" min="1" max="4" step="1" />
+        </label>
+        <div id="test-result" class="test-result"></div>
+      </div>
+      <div class="modal-foot">
+        <button id="btn-test">测试连接</button>
+        <button id="btn-save-settings" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <input id="file-input" type="file" accept="image/*" hidden />
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
