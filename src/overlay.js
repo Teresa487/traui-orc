@@ -1,21 +1,19 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-
-const shotEl = document.getElementById("shot");
-const selEl = document.getElementById("sel");
-const sizeEl = document.getElementById("size");
-const hintEl = document.getElementById("hint");
-const loadingEl = document.getElementById("loading");
 
 const win = getCurrentWindow();
 
-// 当前显示器信息，含 DPI 缩放
-let monitor = { index: 0, scale_factor: 1, width: 0, height: 0 };
+const shadeTop = document.getElementById("shade-top");
+const shadeBottom = document.getElementById("shade-bottom");
+const shadeLeft = document.getElementById("shade-left");
+const shadeRight = document.getElementById("shade-right");
+const selEl = document.getElementById("sel");
+const sizeEl = document.getElementById("size");
+const hintEl = document.getElementById("hint");
+const shotEl = document.getElementById("shot");
 
-// 图片原始像素尺寸
-let imgW = 0;
-let imgH = 0;
+/** 当前显示器的缩放比：CSS 像素 → 截图物理像素 */
+let scaleFactor = 1;
 
 let dragging = false;
 let startX = 0;
@@ -23,64 +21,45 @@ let startY = 0;
 let curX = 0;
 let curY = 0;
 
-/** 把 CSS 像素换算成截图里的物理像素 */
-function toPhysical(cssPx) {
-  return Math.round(cssPx * monitor.scale_factor);
+function resetShades() {
+  shadeTop.style.cssText = "left:0;top:0;right:0;height:0";
+  shadeBottom.style.cssText = "left:0;right:0;bottom:0;height:0";
+  shadeLeft.style.cssText = "left:0;top:0;bottom:0;width:0";
+  shadeRight.style.cssText = "right:0;top:0;bottom:0;width:0";
 }
 
-/** 取主进程在遮罩出现前截好的画面，铺成背景 */
-async function grabScreen() {
-  const [index, b64] = await invoke("take_overlay_shot");
-  monitor.index = index;
+/** 用四块遮罩围出选区，中间那块保持透明，看到的就是真实桌面 */
+function layoutShades(x1, y1, x2, y2) {
+  const left = Math.min(x1, x2);
+  const top = Math.min(y1, y2);
+  const right = Math.max(x1, x2);
+  const bottom = Math.max(y1, y2);
+  const w = window.innerWidth;
+  const h = window.innerHeight;
 
-  shotEl.src = `data:image/png;base64,${b64}`;
-  await new Promise((r) => {
-    if (shotEl.complete && shotEl.naturalWidth) return r();
-    shotEl.onload = r;
-    shotEl.onerror = r;
-  });
+  shadeTop.style.cssText = `left:0;top:0;right:0;height:${top}px`;
+  shadeBottom.style.cssText = `left:0;top:${bottom}px;right:0;bottom:0`;
+  shadeLeft.style.cssText = `left:0;top:${top}px;width:${left}px;height:${bottom - top}px`;
+  shadeRight.style.cssText = `left:${right}px;top:${top}px;right:0;height:${bottom - top}px`;
 
-  imgW = shotEl.naturalWidth || 1;
-  imgH = shotEl.naturalHeight || 1;
-
-  // 用实际图片宽度和窗口宽度的比值推算缩放，比系统 DPI 更贴合
-  monitor.scale_factor = imgW / Math.max(1, window.innerWidth);
-
-  loadingEl.style.display = "none";
-}
-
-function rectFromPoints(x1, y1, x2, y2) {
-  return {
-    left: Math.min(x1, x2),
-    top: Math.min(y1, y2),
-    width: Math.abs(x2 - x1),
-    height: Math.abs(y2 - y1),
-  };
-}
-
-function drawSelection() {
-  if (!dragging) return;
-  const r = rectFromPoints(startX, startY, curX, curY);
   selEl.style.display = "block";
-  selEl.style.left = `${r.left}px`;
-  selEl.style.top = `${r.top}px`;
-  selEl.style.width = `${r.width}px`;
-  selEl.style.height = `${r.height}px`;
+  selEl.style.left = `${left}px`;
+  selEl.style.top = `${top}px`;
+  selEl.style.width = `${right - left}px`;
+  selEl.style.height = `${bottom - top}px`;
 
   sizeEl.style.display = "block";
-  const pw = toPhysical(r.width);
-  const ph = toPhysical(r.height);
+  const pw = Math.round((right - left) * scaleFactor);
+  const ph = Math.round((bottom - top) * scaleFactor);
   sizeEl.textContent = `${pw} × ${ph}`;
 
-  // 标签跟在选框右下，接近屏幕边缘时翻到内侧
-  let lx = r.left + r.width + 8;
-  let ly = r.top + r.height + 8;
-  if (lx + 90 > window.innerWidth) lx = r.left - 90;
-  if (ly + 22 > window.innerHeight) ly = r.top - 26;
+  // 标签跟着光标右下，靠近边缘时翻到内侧
+  let lx = right + 10;
+  let ly = bottom + 10;
+  if (lx + 80 > w) lx = right - 80;
+  if (ly + 20 > h) ly = bottom - 26;
   sizeEl.style.left = `${Math.max(0, lx)}px`;
   sizeEl.style.top = `${Math.max(0, ly)}px`;
-
-  hintEl.style.display = "none";
 }
 
 function resetSelection() {
@@ -88,34 +67,34 @@ function resetSelection() {
   selEl.style.display = "none";
   sizeEl.style.display = "none";
   hintEl.style.display = "block";
+  resetShades();
 }
 
 async function finishSelection() {
-  const r = rectFromPoints(startX, startY, curX, curY);
-  const wPhys = toPhysical(r.width);
-  const hPhys = toPhysical(r.height);
+  const left = Math.min(startX, curX);
+  const top = Math.min(startY, curY);
+  const w = Math.abs(curX - startX);
+  const h = Math.abs(curY - startY);
 
-  // 太小多半是误触，忽略
-  if (wPhys < 6 || hPhys < 6) {
+  const pw = Math.round(w * scaleFactor);
+  const ph = Math.round(h * scaleFactor);
+
+  // 太小当成误触
+  if (pw < 6 || ph < 6) {
     resetSelection();
     return;
   }
 
-  loadingEl.style.display = "flex";
-  loadingEl.textContent = "识别中……";
-
   try {
-    // 遮罩只交出坐标，识别和显示都由主窗口负责
     await invoke("submit_selection", {
-      x: toPhysical(r.left),
-      y: toPhysical(r.top),
-      width: wPhys,
-      height: hPhys,
+      x: Math.round(left * scaleFactor),
+      y: Math.round(top * scaleFactor),
+      width: pw,
+      height: ph,
     });
     await win.hide();
   } catch (e) {
-    console.error("提交选区失败", e);
-    loadingEl.textContent = `提交失败: ${e}`;
+    hintEl.innerHTML = `<span class="err">提交失败：${e}</span><br />按 Esc 关闭`;
   }
 }
 
@@ -127,13 +106,12 @@ async function cancel() {
 /* ---------- 鼠标事件 ---------- */
 
 window.addEventListener("mousedown", (e) => {
+  // 右键直接取消
   if (e.button === 2) {
-    // 右键重选
-    resetSelection();
+    cancel();
     return;
   }
   if (e.button !== 0) return;
-  // 屏蔽默认的窗口拖动
   e.preventDefault();
   dragging = true;
   startX = e.clientX;
@@ -147,14 +125,14 @@ window.addEventListener("mousemove", (e) => {
   if (!dragging) return;
   curX = e.clientX;
   curY = e.clientY;
-  drawSelection();
+  layoutShades(startX, startY, curX, curY);
 });
 
 window.addEventListener("mouseup", async (e) => {
   if (e.button !== 0 || !dragging) return;
   curX = e.clientX;
   curY = e.clientY;
-  drawSelection();
+  layoutShades(startX, startY, curX, curY);
   dragging = false;
   await finishSelection();
 });
@@ -167,26 +145,34 @@ window.addEventListener("contextmenu", (e) => e.preventDefault());
 
 /* ---------- 启动 ---------- */
 
-// 不依赖事件：页面加载完直接向主进程要那张预存的截图。
-// 主进程是在窗口创建之前就截好图的，所以此刻取到的就是真实画面，
-// 也避开了「事件先于监听器注册而丢失」这个坑。
-let loaded = false;
-
-async function boot() {
-  if (loaded) return;
-  loaded = true;
+// 缩放比由主进程告知；拿不到就按 1 处理，100% 缩放下依然正确
+async function initScale() {
   try {
-    await grabScreen();
-  } catch (e) {
-    loadingEl.textContent = `截屏失败: ${e}`;
+    const s = await win.scaleFactor();
+    if (s > 0) scaleFactor = s;
+  } catch {
+    scaleFactor = 1;
   }
 }
 
-// 主进程也可能主动通知，谁先到算谁
-listen("begin-capture", boot);
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", boot);
-} else {
-  boot();
+/** 取主进程在遮罩出现前抓好的整屏图，铺成背景 */
+async function loadShot() {
+  try {
+    const [, b64] = await invoke("take_overlay_shot");
+    shotEl.src = `data:image/png;base64,${b64}`;
+    await new Promise((r) => {
+      if (shotEl.complete && shotEl.naturalWidth) return r();
+      shotEl.onload = r;
+      shotEl.onerror = r;
+    });
+    // 用图片宽度和窗口宽度之比推算缩放，比系统 DPI 更贴合实际渲染
+    if (shotEl.naturalWidth && window.innerWidth) {
+      scaleFactor = shotEl.naturalWidth / window.innerWidth;
+    }
+  } catch (e) {
+    hintEl.innerHTML = `<span class="err">获取截图失败：${e}</span><br />按 Esc 关闭`;
+  }
 }
+
+resetShades();
+initScale().then(loadShot);

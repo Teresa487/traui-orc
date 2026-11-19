@@ -9,7 +9,7 @@ mod config;
 
 use commands::AppState;
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 /// 解析快捷键字符串。支持 "F4"、"Ctrl+Alt+O" 这类写法。
@@ -110,10 +110,11 @@ pub struct OverlayShotData {
     pub png_b64: String,
 }
 
-/// 拉起全屏遮罩窗口。已经存在就复用。
+/// 拉起遮罩：先抓屏存进内存，再显示已存在的遮罩窗口。
 ///
-/// 关键点：屏幕内容必须在遮罩出现**之前**截下来，否则截到的是遮罩本身。
-/// 所以这里先截屏存进 OverlayShot，前端再从命令里把图取走当背景。
+/// 注意不要在事件处理器里新建窗口 —— Tauri 官方文档指出，Windows 上在
+/// 同步的事件处理里创建 webview 会死锁。所以遮罩窗口预先在 tauri.conf.json
+/// 里声明好，这里只做「抓图 + 显示」。
 fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
     // 跟鼠标走：用户在哪块屏幕上按的快捷键，就在哪块屏幕上框选
     let (cx, cy) = app
@@ -122,58 +123,34 @@ fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
         .unwrap_or((0, 0));
     let _ = app.emit("capture-stage", format!("鼠标位置 {cx},{cy}"));
 
-    let (idx, m) = capture::monitor_at(cx, cy)
-        .map_err(|e| format!("定位显示器失败: {e}"))?;
+    let (idx, m) = capture::monitor_at(cx, cy).map_err(|e| format!("定位显示器失败: {e}"))?;
     let _ = app.emit(
         "capture-stage",
         format!("屏幕 {idx}: {}x{} @{:.1}x", m.width, m.height, m.scale_factor),
     );
 
-    // 遮罩还没出现，此刻截屏拿到的才是真实画面
-    let shot = capture::capture_monitor_png_base64(idx)
-        .map_err(|e| format!("抓屏失败: {e}"))?;
+    // 遮罩还没出现，此刻抓的才是真实画面
+    let shot = capture::capture_monitor_png_base64(idx).map_err(|e| format!("抓屏失败: {e}"))?;
     let _ = app.emit("capture-stage", format!("抓屏成功 {} 字节", shot.len()));
+
     {
         let state = app.state::<OverlayShot>();
-        *state.0.lock().unwrap() = Some(OverlayShotData { monitor: idx, png_b64: shot });
+        *state.0.lock().unwrap() = Some(OverlayShotData {
+            monitor: idx,
+            png_b64: shot,
+        });
     }
 
-    if let Some(w) = app.get_webview_window("overlay") {
-        let _ = w.show();
-        let _ = w.set_focus();
-        let _ = app.emit("begin-capture", ());
-        return Ok(());
-    }
+    // 遮罩是全屏窗口，只在鼠标所在那块屏幕上显示
+    let win = app
+        .get_webview_window("overlay")
+        .ok_or("找不到遮罩窗口")?;
 
-    // xcap 的 x/y/width/height 都是物理像素，而 Tauri 的 inner_size/position
-    // 收的是逻辑像素。Windows 上两者只在 100% 缩放时相等，
-    // 所以这里统一换算，否则 150%/200% 的屏幕上遮罩会错位或偏小。
-    let scale = if m.scale_factor > 0.0 { m.scale_factor as f64 } else { 1.0 };
-    let logical_x = m.x as f64 / scale;
-    let logical_y = m.y as f64 / scale;
-    let logical_w = m.width as f64 / scale;
-    let logical_h = m.height as f64 / scale;
-
-    let win = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay.html".into()))
-        .title("选择区域")
-        .inner_size(logical_w, logical_h)
-        .position(logical_x, logical_y)
-        .decorations(false)
-        .transparent(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .focused(true)
-        .build()
-        .map_err(|e| format!("创建遮罩窗口失败: {e}"))?;
-
+    // 用物理像素精确定位到鼠标所在的那块屏幕
+    let _ = win.set_position(tauri::PhysicalPosition::new(m.x, m.y));
+    let _ = win.set_size(tauri::PhysicalSize::new(m.width, m.height));
+    let _ = win.show();
     let _ = win.set_focus();
-    let app2 = app.clone();
-    // 等遮罩真正挂载后再通知它取图
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(180));
-        let _ = app2.emit("begin-capture", ());
-    });
 
     Ok(())
 }
@@ -262,28 +239,24 @@ pub fn run() {
             }
             let _ = app.emit("capture-stage", "热键已触发");
 
-            // hide() 只是把请求丢给窗口线程就返回，画面还没真正消失。
-            // 不等一下就去截屏，会把主窗口一起截进去。
+            // 藏掉主窗口，免得被抓进截图里
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.hide();
             }
+
+            // 抓屏 + 显示遮罩。窗口是预先建好的，这里不新建，
+            // 避免在事件处理里创建 webview 造成死锁。
             let app2 = app.clone();
             std::thread::spawn(move || {
-                // 等主窗口真正消失，否则抓屏会把窗口一起截进去
+                // 等主窗口真正消失，否则会截到它
                 std::thread::sleep(std::time::Duration::from_millis(150));
-
-                // 建窗口只能在主线程做，子线程调 build() 会失败且不报错
-                let app3 = app2.clone();
-                let _ = app2.run_on_main_thread(move || {
-                    if let Err(err) = spawn_overlay(&app3) {
-                        // 没有控制台，错误必须回传界面，否则用户只看到「没反应」
-                        let _ = app3.emit("capture-error", format!("截图失败: {err}"));
-                        if let Some(w) = app3.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
+                if let Err(err) = spawn_overlay(&app2) {
+                    let _ = app2.emit("capture-error", format!("截图失败: {err}"));
+                    if let Some(w) = app2.get_webview_window("main") {
+                        let _ = w.show();
+                        let _ = w.set_focus();
                     }
-                });
+                }
             });
         })
         .build();

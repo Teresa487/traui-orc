@@ -171,7 +171,11 @@ pub fn submit_selection(
     width: u32,
     height: u32,
 ) -> Result<(), String> {
-    // 先恢复主窗口，用户才看得到进度
+    // 先收起遮罩，否则它会一直盖在主窗口上面
+    if let Some(o) = app.get_webview_window("overlay") {
+        let _ = o.hide();
+    }
+    // 再恢复主窗口，用户才看得到进度
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
@@ -250,6 +254,7 @@ pub fn begin_capture(app: AppHandle) -> Result<(), String> {
 pub fn end_capture(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
+        let _ = w.unminimize();
         let _ = w.set_focus();
     }
     Ok(())
