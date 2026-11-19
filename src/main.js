@@ -202,6 +202,16 @@ listen("begin-capture", () => {
   setStatus("遮罩已打开，请框选区域", "busy");
 });
 
+/* 截图链路的错误没有控制台可看，直接显示在状态栏 */
+listen("capture-error", (e) => {
+  setStatus(String(e.payload), "err");
+});
+
+/* 分阶段进度：卡在哪一步一眼能看出来 */
+listen("capture-stage", (e) => {
+  setStatus(String(e.payload), "busy");
+});
+
 /* 快捷键：Ctrl+Enter 复制，Esc 关设置 */
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !els.modal.classList.contains("hidden")) {

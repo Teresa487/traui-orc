@@ -167,23 +167,26 @@ window.addEventListener("contextmenu", (e) => e.preventDefault());
 
 /* ---------- 启动 ---------- */
 
-// 主进程建好窗口后会发 begin-capture，收到再截屏，
-// 这样截到的画面里不会有遮罩自己
-listen("begin-capture", async () => {
+// 不依赖事件：页面加载完直接向主进程要那张预存的截图。
+// 主进程是在窗口创建之前就截好图的，所以此刻取到的就是真实画面，
+// 也避开了「事件先于监听器注册而丢失」这个坑。
+let loaded = false;
+
+async function boot() {
+  if (loaded) return;
+  loaded = true;
   try {
     await grabScreen();
   } catch (e) {
     loadingEl.textContent = `截屏失败: ${e}`;
   }
-});
+}
 
-// 兜底：万一事件在监听注册前就发了
-setTimeout(async () => {
-  if (loadingEl.style.display !== "none") {
-    try {
-      await grabScreen();
-    } catch (e) {
-      loadingEl.textContent = `截屏失败: ${e}`;
-    }
-  }
-}, 700);
+// 主进程也可能主动通知，谁先到算谁
+listen("begin-capture", boot);
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", boot);
+} else {
+  boot();
+}

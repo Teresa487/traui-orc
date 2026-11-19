@@ -120,10 +120,19 @@ fn spawn_overlay(app: &tauri::AppHandle) -> Result<(), String> {
         .cursor_position()
         .map(|p| (p.x as i32, p.y as i32))
         .unwrap_or((0, 0));
-    let (idx, m) = capture::monitor_at(cx, cy)?;
+    let _ = app.emit("capture-stage", format!("鼠标位置 {cx},{cy}"));
+
+    let (idx, m) = capture::monitor_at(cx, cy)
+        .map_err(|e| format!("定位显示器失败: {e}"))?;
+    let _ = app.emit(
+        "capture-stage",
+        format!("屏幕 {idx}: {}x{} @{:.1}x", m.width, m.height, m.scale_factor),
+    );
 
     // 遮罩还没出现，此刻截屏拿到的才是真实画面
-    let shot = capture::capture_monitor_png_base64(idx)?;
+    let shot = capture::capture_monitor_png_base64(idx)
+        .map_err(|e| format!("抓屏失败: {e}"))?;
+    let _ = app.emit("capture-stage", format!("抓屏成功 {} 字节", shot.len()));
     {
         let state = app.state::<OverlayShot>();
         *state.0.lock().unwrap() = Some(OverlayShotData { monitor: idx, png_b64: shot });
@@ -251,6 +260,8 @@ pub fn run() {
             if event.state() != ShortcutState::Pressed {
                 return;
             }
+            let _ = app.emit("capture-stage", "热键已触发");
+
             // hide() 只是把请求丢给窗口线程就返回，画面还没真正消失。
             // 不等一下就去截屏，会把主窗口一起截进去。
             if let Some(w) = app.get_webview_window("main") {
@@ -258,13 +269,21 @@ pub fn run() {
             }
             let app2 = app.clone();
             std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(120));
-                if let Err(err) = spawn_overlay(&app2) {
-                    eprintln!("拉起遮罩失败: {err}");
-                    if let Some(w) = app2.get_webview_window("main") {
-                        let _ = w.show();
+                // 等主窗口真正消失，否则抓屏会把窗口一起截进去
+                std::thread::sleep(std::time::Duration::from_millis(150));
+
+                // 建窗口只能在主线程做，子线程调 build() 会失败且不报错
+                let app3 = app2.clone();
+                let _ = app2.run_on_main_thread(move || {
+                    if let Err(err) = spawn_overlay(&app3) {
+                        // 没有控制台，错误必须回传界面，否则用户只看到「没反应」
+                        let _ = app3.emit("capture-error", format!("截图失败: {err}"));
+                        if let Some(w) = app3.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
                     }
-                }
+                });
             });
         })
         .build();
